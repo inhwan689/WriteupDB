@@ -4,8 +4,8 @@ challenge_name: "BlockCityTimes"
 category: "web"
 difficulty: "medium"
 author: "yeahhbean"
-date: "2026-04-12"
-points: 100
+date: "2026-04-05"
+points: 500
 tags: [xss, stored-xss, spring-boot, actuator, path-traversal, csrf]
 ---
 

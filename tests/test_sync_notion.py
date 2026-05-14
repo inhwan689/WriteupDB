@@ -1,0 +1,171 @@
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "sync_notion.py"
+SPEC = importlib.util.spec_from_file_location("writeup_sync_notion", MODULE_PATH)
+sync_notion = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(sync_notion)
+
+
+class LegacyDatabases:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def query(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"results": [{"id": "legacy-page"}]}
+
+
+class LegacyNotion:
+    def __init__(self) -> None:
+        self.databases = LegacyDatabases()
+
+
+class NewDatabases:
+    def __init__(self, response) -> None:
+        self.response = response
+        self.retrieve_calls = []
+
+    def retrieve(self, **kwargs):
+        self.retrieve_calls.append(kwargs)
+        return self.response
+
+
+class NewDataSources:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def query(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"results": [{"id": "new-page"}]}
+
+
+class NewNotion:
+    def __init__(self, response) -> None:
+        self.databases = NewDatabases(response)
+        self.data_sources = NewDataSources()
+
+
+class QueryDatabaseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        sync_notion._DATA_SOURCE_IDS.clear()
+
+    def test_legacy_sdk_uses_databases_query(self) -> None:
+        notion = LegacyNotion()
+
+        response = sync_notion.query_database(notion, "db-123", page_size=1)
+
+        self.assertEqual(response["results"][0]["id"], "legacy-page")
+        self.assertEqual(
+            notion.databases.calls,
+            [{"database_id": "db-123", "page_size": 1}],
+        )
+
+    def test_new_sdk_uses_data_sources_query(self) -> None:
+        notion = NewNotion({"data_sources": [{"id": "ds-123", "name": "Main"}]})
+
+        response = sync_notion.query_database(notion, "db-123", page_size=1)
+
+        self.assertEqual(response["results"][0]["id"], "new-page")
+        self.assertEqual(
+            notion.databases.retrieve_calls,
+            [{"database_id": "db-123"}],
+        )
+        self.assertEqual(
+            notion.data_sources.calls,
+            [{"data_source_id": "ds-123", "page_size": 1}],
+        )
+
+    def test_new_sdk_caches_resolved_data_source(self) -> None:
+        notion = NewNotion({"data_sources": [{"id": "ds-123", "name": "Main"}]})
+
+        sync_notion.query_database(notion, "db-123", page_size=1)
+        sync_notion.query_database(notion, "db-123", page_size=2)
+
+        self.assertEqual(len(notion.databases.retrieve_calls), 1)
+        self.assertEqual(
+            notion.data_sources.calls,
+            [
+                {"data_source_id": "ds-123", "page_size": 1},
+                {"data_source_id": "ds-123", "page_size": 2},
+            ],
+        )
+
+    def test_new_sdk_requires_data_source_metadata(self) -> None:
+        notion = NewNotion({})
+
+        with self.assertRaises(RuntimeError):
+            sync_notion.query_database(notion, "db-123", page_size=1)
+
+
+class CodeLanguageTests(unittest.TestCase):
+    def test_known_language_is_preserved(self) -> None:
+        self.assertEqual(sync_notion.normalize_code_language("python"), "python")
+
+    def test_text_alias_maps_to_plain_text(self) -> None:
+        self.assertEqual(sync_notion.normalize_code_language("text"), "plain text")
+
+    def test_unknown_language_falls_back_to_plain_text(self) -> None:
+        self.assertEqual(sync_notion.normalize_code_language("foobar"), "plain text")
+
+    def test_markdown_parser_uses_normalized_language(self) -> None:
+        blocks = sync_notion.markdown_to_notion_blocks("```text\nhello\n```")
+
+        self.assertEqual(blocks[0]["type"], "code")
+        self.assertEqual(blocks[0]["code"]["language"], "plain text")
+
+    def test_markdown_parser_handles_heading_without_space(self) -> None:
+        blocks = sync_notion.markdown_to_notion_blocks("###배운점\n본문")
+
+        self.assertEqual(blocks[0]["type"], "heading_3")
+        self.assertEqual(
+            blocks[0]["heading_3"]["rich_text"][0]["text"]["content"],
+            "배운점",
+        )
+
+
+class FrontmatterParsingTests(unittest.TestCase):
+    def test_parse_writeup_handles_utf8_bom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bom.md"
+            path.write_text(
+                "\ufeff---\nctf_name: Test CTF\nchallenge_name: Bom Challenge\nauthor: tester\n---\nbody\n",
+                encoding="utf-8",
+            )
+
+            metadata, content = sync_notion.parse_writeup(path)
+
+        self.assertEqual(metadata["ctf_name"], "Test CTF")
+        self.assertEqual(metadata["challenge_name"], "Bom Challenge")
+        self.assertEqual(content.strip(), "body")
+
+
+class ClientConfigTests(unittest.TestCase):
+    def test_notion_client_uses_env_timeout(self) -> None:
+        old_api_key = os.environ.get("NOTION_API_KEY")
+        old_timeout = os.environ.get("NOTION_TIMEOUT_MS")
+        try:
+            os.environ["NOTION_API_KEY"] = "test-token"
+            os.environ["NOTION_TIMEOUT_MS"] = "12345"
+
+            client = sync_notion.get_notion_client()
+
+            self.assertEqual(client.options.timeout_ms, 12345)
+        finally:
+            if old_api_key is None:
+                os.environ.pop("NOTION_API_KEY", None)
+            else:
+                os.environ["NOTION_API_KEY"] = old_api_key
+            if old_timeout is None:
+                os.environ.pop("NOTION_TIMEOUT_MS", None)
+            else:
+                os.environ["NOTION_TIMEOUT_MS"] = old_timeout
+
+
+if __name__ == "__main__":
+    unittest.main()

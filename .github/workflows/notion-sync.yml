@@ -6,6 +6,20 @@ on:
       - main
     paths:
       - "writeups/**/*.md"
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Sync할 writeup 경로들. 줄바꿈으로 구분"
+        required: false
+        type: string
+      week_number:
+        description: "제출 현황 업데이트에 사용할 주차"
+        required: false
+        type: string
+      pr_number:
+        description: "week_number가 없을 때 /week 댓글을 읽어올 merged PR 번호"
+        required: false
+        type: string
 
 jobs:
   sync:
@@ -22,23 +36,39 @@ jobs:
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
-      - name: Get changed writeup files
+      - name: Resolve target writeup files
         id: changed
         run: |
-          FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1 HEAD -- 'writeups/**/*.md' || true)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.files }}" ]; then
+            FILES="${{ inputs.files }}"
+          else
+            FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1 HEAD -- 'writeups/**/*.md' || true)
+          fi
           echo "files<<EOF" >> $GITHUB_OUTPUT
           echo "$FILES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Get week number from PR comment
+      - name: Resolve week number
         id: week
         if: steps.changed.outputs.files != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_NUM=$(gh pr list --state merged --limit 1 --json number --jq '.[0].number' || true)
+          if [ -n "${{ inputs.week_number }}" ]; then
+            echo "week=${{ inputs.week_number }}" >> $GITHUB_OUTPUT
+            echo "[INFO] Manual dispatch → week: ${{ inputs.week_number }}"
+            exit 0
+          fi
+          PR_NUM="${{ inputs.pr_number }}"
+          if [ -z "$PR_NUM" ]; then
+            PR_NUM=$(printf '%s\n' "${{ github.event.head_commit.message }}" | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          fi
+          if [ -z "$PR_NUM" ]; then
+            PR_NUM=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq 'map(select(.merged_at != null))[0].number // empty' || true)
+          fi
           if [ -z "$PR_NUM" ]; then
             echo "week=" >> $GITHUB_OUTPUT
+            echo "[WARN] PR 번호를 찾지 못해 week를 비웁니다."
             exit 0
           fi
           WEEK=$(gh pr view "$PR_NUM" --json comments --jq '.comments[].body' | grep -oP '/week\s+\K\d+' | tail -1 || true)
@@ -55,5 +85,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           WEEK_NUMBER: ${{ steps.week.outputs.week }}
+          NOTION_TIMEOUT_MS: "60000"
+          PYTHONUNBUFFERED: "1"
         run: |
-          echo "${{ steps.changed.outputs.files }}" | xargs python scripts/sync_notion.py
+          FILES="${{ steps.changed.outputs.files }}"
+          while IFS= read -r file; do
+            if [ -z "$file" ]; then
+              continue
+            fi
+            echo "[SYNC] dispatch $file"
+            timeout -k 5s 60s python -u scripts/sync_notion.py "$file"
+          done <<< "$FILES"

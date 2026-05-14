@@ -4,6 +4,11 @@ ASC 보안 동아리 CTF Writeup 관리 시스템
 
 멤버가 Git PR로 writeup을 제출하면, 관리자 리뷰 후 merge 시 자동으로 Notion DB에 동기화됩니다.
 
+## 마감
+
+- **매주 화요일 23:59** 까지 PR merge 완료 시 해당 주차 제출로 인정
+- 주간 기준: 화요일 ~ 월요일
+
 ## 구조
 
 ```
@@ -52,10 +57,10 @@ python scripts/validate_frontmatter.py
 ### 4. PR 제출
 
 ```bash
-git checkout -b writeup/2026-Example-CTF/example-challenge
+git checkout -b writeup/2026-Example-CTF/web/example-challenge
 git add .
 git commit -m "Add writeup: 2026-Example-CTF/web/example-challenge"
-git push origin writeup/2026-Example-CTF/example-challenge
+git push origin writeup/2026-Example-CTF/web/example-challenge
 # GitHub에서 PR 생성
 ```
 
@@ -67,6 +72,7 @@ git push origin writeup/2026-Example-CTF/example-challenge
 [멤버] -> fork/branch -> [PR 제출] -> 리뷰 -> [merge] -> [GitHub Actions] -> [Notion DB]
                               |                              |
                         CI: frontmatter 검증         변경된 .md 파싱 -> 동기화
+                                                     + 제출 현황 체크박스 업데이트
 ```
 
 ## 설정 (관리자)
@@ -76,21 +82,22 @@ git push origin writeup/2026-Example-CTF/example-challenge
 | Secret | 설명 |
 |--------|------|
 | `NOTION_API_KEY` | Notion Internal Integration Token |
-| `NOTION_DATABASE_ID` | 대상 Notion DB ID |
+| `NOTION_DATABASE_ID` | Writeup Notion DB ID |
+| `NOTION_TRACKING_DB_ID` | 제출 현황 DB ID |
+| `NOTION_MEMBERS_DB_ID` | 부원 명단 DB ID |
 
 ### Notion DB 스키마
 
 | 속성명 | 타입 | 비고 |
 |--------|------|------|
 | 문제명 | Title | |
-| CTF명 | Rich Text | |
-| 카테고리 | Select | WEB/PWN/REV/CRYPTO/MISC |
+| 대회명 | Select | CTF 대회명 |
+| 분야 | Multi-select | WEB/PWN/REV/CRYPTO/MISC |
 | 난이도 | Select | easy/medium/hard/insane |
-| 작성자 | Rich Text | GitHub username (문제명+작성자 조합으로 구분) |
+| 닉네임 | Rich Text | GitHub username |
 | 날짜 | Date | |
-| 점수 | Number | |
-| 태그 | Multi-select | 사용 기술/툴 |
-| GitHub 링크 | URL | writeup 원문 링크 |
+| 취약점 태그 | Multi-select | 사용 기술/취약점 |
+| Git 링크 | URL | writeup 원문 링크 |
 
 ### 브랜치 보호 규칙 (권장)
 

